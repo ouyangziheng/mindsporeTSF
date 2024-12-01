@@ -68,12 +68,12 @@ class TrainOneStep(nn.Cell):
 class Exp_Basic(object):
     def __init__(self, args):
         self.args = args
-        self.device = self._acquire_device()  # 获取设备信息
-        self.model = self._build_model()  # 创建模型
-        # self.model.to(self.device)  # 将模型移动到指定设备上
+        self.device = self._acquire_device()  
+        self.model = self._build_model() 
+        # self.model.to(self.device) 
 
     def _build_model(self):
-        raise NotImplementedError  # 子类需要实现该方法来构建模型
+        raise NotImplementedError 
         return None
 
     def _acquire_device(self):
@@ -213,7 +213,7 @@ class Exp_Main(Exp_Basic):
             max_lr=self.args.learning_rate
         )
 
-        best_vali_loss = float('inf')  # 初始化最佳验证损失为无穷大
+        best_vali_loss = float('inf')  
 
         for epoch in range(self.args.train_epochs):
             iter_count = 0
@@ -260,8 +260,7 @@ class Exp_Main(Exp_Basic):
 
             print(f"Epoch {epoch + 1} | Train Loss: {avg_loss:.7f}, Vali Loss: {vali_loss:.7f}, Test Loss: {test_loss:.7f}")
 
-            # 进行模型保存
-            if vali_loss < best_vali_loss:  # 如果当前验证损失更低，保存模型
+            if vali_loss < best_vali_loss:  
                 best_vali_loss = vali_loss
                 best_model_path = os.path.join(path, 'best_model.ckpt')
                 ms.save_checkpoint(self.model, best_model_path)  # 保存模型
@@ -345,10 +344,10 @@ class Exp_Main(Exp_Basic):
         
 
     def predict(self, setting, load=False):
-        # 获取预测数据集
+        
         pred_data, pred_loader = self._get_data(flag='pred')
 
-        # 加载模型（如果设置了 load=True）
+
         if load:
             path = os.path.join(self.args.checkpoints, setting)
             best_model_path = os.path.join(path, 'checkpoint.pth')
@@ -356,18 +355,16 @@ class Exp_Main(Exp_Basic):
 
         preds = []
 
-        self.model.set_train(False)  # 设置模型为评估模式
+        self.model.set_train(False)  
         for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(pred_loader):
             batch_x = Tensor(batch_x, ms.float32).to(self.device)
             batch_y = Tensor(batch_y, ms.float32)
             batch_x_mark = Tensor(batch_x_mark, ms.float32).to(self.device)
             batch_y_mark = Tensor(batch_y_mark, ms.float32).to(self.device)
 
-            # decoder 输入（初始化为零）
             dec_inp = Tensor(np.zeros([batch_y.shape[0], self.args.pred_len, batch_y.shape[2]]), ms.float32)
             dec_inp = ops.Concat(1)([batch_y[:, :self.args.label_len, :], dec_inp])  # 拼接输入
 
-            # 进行预测
             with ms.no_grad():
                 if any(substr in self.args.model for substr in {'Linear', 'TST', 'SparseTSF'}):
                     outputs = self.model(batch_x)
@@ -377,14 +374,13 @@ class Exp_Main(Exp_Basic):
                     else:
                         outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
 
-            # 获取预测结果并转为numpy
             pred = outputs.asnumpy()
             preds.append(pred)
 
         preds = np.array(preds)
-        preds = preds.reshape(-1, preds.shape[-2], preds.shape[-1])  # 重塑预测结果
+        preds = preds.reshape(-1, preds.shape[-2], preds.shape[-1])  
 
-        # 保存预测结果
+
         folder_path = os.path.join('./results', setting)
         if not os.path.exists(folder_path):
             os.makedirs(folder_path)
