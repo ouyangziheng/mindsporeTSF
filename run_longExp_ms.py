@@ -11,11 +11,6 @@ import mindspore.ops as ops
 from exp.exp_main_mindspore import Exp_Main
 import debugpy
 
-# debugpy.listen(("localhost", 5678))  # 指定调试监听地址和端口
-# print("等待调试器连接...")
-# debugpy.wait_for_client()           # 等待 VSCode 调试器连接
-# debugpy.breakpoint()                # 设置一个断点
-
 
 parser = argparse.ArgumentParser(description='SparseTSF & other models for Time Series Forecasting')
 
