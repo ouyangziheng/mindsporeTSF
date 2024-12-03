@@ -1,8 +1,7 @@
-import mindspore
-import mindspore.numpy as np
+import numpy as np
+import mindtorch.torch as torch
 import matplotlib.pyplot as plt
 import time
-from mindspore import Tensor, ops
 
 plt.switch_backend('agg')
 
@@ -20,55 +19,69 @@ def adjust_learning_rate(optimizer, scheduler, epoch, args, printout=True):
     elif args.lradj == 'constant':
         lr_adjust = {epoch: args.learning_rate}
     elif args.lradj == '3':
-        lr_adjust = {epoch: args.learning_rate if epoch < 10 else args.learning_rate * 0.1}
+        lr_adjust = {epoch: args.learning_rate if epoch < 10 else args.learning_rate*0.1}
     elif args.lradj == '4':
-        lr_adjust = {epoch: args.learning_rate if epoch < 15 else args.learning_rate * 0.1}
+        lr_adjust = {epoch: args.learning_rate if epoch < 15 else args.learning_rate*0.1}
     elif args.lradj == '5':
-        lr_adjust = {epoch: args.learning_rate if epoch < 25 else args.learning_rate * 0.1}
+        lr_adjust = {epoch: args.learning_rate if epoch < 25 else args.learning_rate*0.1}
     elif args.lradj == '6':
-        lr_adjust = {epoch: args.learning_rate if epoch < 5 else args.learning_rate * 0.1}
+        lr_adjust = {epoch: args.learning_rate if epoch < 5 else args.learning_rate*0.1}  
     elif args.lradj == 'TST':
         lr_adjust = {epoch: scheduler.get_last_lr()[0]}
-
+    
     if epoch in lr_adjust.keys():
         lr = lr_adjust[epoch]
         for param_group in optimizer.param_groups:
             param_group['lr'] = lr
-        if printout:
-            print('Updating learning rate to {}'.format(lr))
+        if printout: print('Updating learning rate to {}'.format(lr))
 
 
 class EarlyStopping:
-    def __init__(self, patience=7, verbose=False, delta=0):
+    def __init__(self, patience=10, min_delta=0, verbose=False):
+        """
+        初始化早停机制。
+        
+        参数:
+        - patience: 如果验证集损失连续 `patience` 轮没有改善，则停止训练
+        - min_delta: 认为损失有改善的最小阈值，若小于此值认为没有改善
+        - verbose: 是否打印每次早停检查的信息
+        """
         self.patience = patience
+        self.min_delta = min_delta
         self.verbose = verbose
+        
+        self.best_loss = np.inf  
+        self.counter = 0 
+        self.stop_training = False  
+    
+    def check(self, val_loss, model):
+        """
+        检查验证集损失是否有改善，并根据需要更新状态。
+        
+        参数:
+        - val_loss: 当前验证集的损失
+        - model: 当前的模型
+        """
+        if self.best_loss - val_loss > self.min_delta:  
+            self.best_loss = val_loss 
+            self.counter = 0  
+            if self.verbose:
+                print(f"验证集损失改善为 {val_loss:.4f}")
+        else:  
+            self.counter += 1  
+            if self.verbose:
+                print(f"验证集损失没有改善，当前损失为 {val_loss:.4f}")
+        
+        if self.counter >= self.patience:  
+            self.stop_training = True  
+            if self.verbose:
+                print(f"验证集损失连续 {self.patience} 轮没有改善，停止训练")
+    
+    def reset(self):
+        """重置早停机制，适用于每次新的训练开始时。"""
+        self.best_loss = np.inf
         self.counter = 0
-        self.best_score = None
-        self.early_stop = False
-        self.val_loss_min = np.Inf
-        self.delta = delta
-
-    def __call__(self, val_loss, model, path):
-        score = -val_loss
-        if self.best_score is None:
-            self.best_score = score
-            self.save_checkpoint(val_loss, model, path)
-        elif score < self.best_score + self.delta:
-            self.counter += 1
-            print(f'EarlyStopping counter: {self.counter} out of {self.patience}')
-            if self.counter >= self.patience:
-                self.early_stop = True
-        else:
-            self.best_score = score
-            self.save_checkpoint(val_loss, model, path)
-            self.counter = 0
-
-    def save_checkpoint(self, val_loss, model, path):
-        if self.verbose:
-            print(f'Validation loss decreased ({self.val_loss_min:.6f} --> {val_loss:.6f}).  Saving model ...')
-        mindspore.save_checkpoint(model, path + '/' + 'checkpoint.ckpt')
-        self.val_loss_min = val_loss
-
+        self.stop_training = False
 
 class dotdict(dict):
     """dot.notation access to dictionary attributes"""
@@ -100,17 +113,12 @@ def visual(true, preds=None, name='./pic/test.pdf'):
     plt.legend()
     plt.savefig(name, bbox_inches='tight')
 
-
-def test_params_flop(model, x_shape):
+def test_params_flop(model,x_shape):
     """
-    If you want to test former's flop, you need to give default value to inputs in model.forward(),
-    the following code can only pass one argument to forward()
+    If you want to thest former's flop, you need to give default value to inputs in model.forward(), the following code can only pass one argument to forward()
     """
-    from mindspore import context
-    from mindspore.profiler import Profiler
-    context.set_context(mode=context.GRAPH_MODE, device_target="GPU")
-    profiler = Profiler()
-    dummy_input = Tensor(np.ones(x_shape), mindspore.float32)
-    model(dummy_input)
-    profiler.analyse()
-    profiler.export(file_path='./flops_info')
+    from ptflops import get_model_complexity_info
+    with torch.cuda.device(0):
+        macs, params = get_model_complexity_info(model.cuda(), x_shape, as_strings=True, print_per_layer_stat=False)
+        print('{:<30}  {:<8}'.format('Computational complexity: ', macs))
+        print('{:<30}  {:<8}'.format('Number of parameters: ', params))
