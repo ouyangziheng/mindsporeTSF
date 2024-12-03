@@ -1,10 +1,16 @@
 import argparse
 import os
-import mindspore
-from exp.exp_main import Exp_Main
 import random
 import numpy as np
+import mindspore
+import mindspore.nn as nn
 from mindspore import context
+from mindspore import Tensor
+from mindspore.train import Model
+import mindspore.ops as ops
+from exp.exp_main_mindspore import Exp_Main
+import debugpy
+
 
 parser = argparse.ArgumentParser(description='SparseTSF & other models for Time Series Forecasting')
 
@@ -32,7 +38,6 @@ parser.add_argument('--pred_len', type=int, default=96, help='prediction sequenc
 # SparseTSF
 parser.add_argument('--period_len', type=int, default=24, help='period length')
 parser.add_argument('--model_type', default='linear', help='model type: linear/mlp')
-
 
 # PatchTST
 parser.add_argument('--fc_dropout', type=float, default=0.05, help='fully connected dropout')
@@ -66,7 +71,7 @@ parser.add_argument('--dropout', type=float, default=0.05, help='dropout')
 parser.add_argument('--embed', type=str, default='learned',
                     help='time features encoding, options:[timeF, fixed, learned]')
 parser.add_argument('--activation', type=str, default='gelu', help='activation')
-parser.add_argument('--output_attention', action='store_true', default=False, help='whether to output attention in encoder')
+parser.add_argument('--output_attention', action='store_true', default=False, help='whether to output attention in ecoder')
 parser.add_argument('--do_predict', action='store_true', help='whether to predict unseen future data')
 
 # optimization
@@ -86,7 +91,7 @@ parser.add_argument('--use_amp', action='store_true', help='use automatic mixed 
 parser.add_argument('--use_gpu', type=bool, default=True, help='use gpu')
 parser.add_argument('--gpu', type=int, default=0, help='gpu')
 parser.add_argument('--use_multi_gpu', type=int, help='use multiple gpus', default=0)
-parser.add_argument('--devices', type=str, default='0,1', help='device ids of multiple gpus')
+parser.add_argument('--devices', type=str, default='0,1', help='device ids of multile gpus')
 parser.add_argument('--test_flop', action='store_true', default=False, help='See utils/tools for usage')
 
 args = parser.parse_args()
@@ -94,12 +99,16 @@ args = parser.parse_args()
 # random seed
 fix_seed_list = range(2023, 2033)
 
-args.use_gpu = True if mindspore.cuda.is_available() and args.use_gpu else False
+# 设置 MindSpore 的设备
+context.set_context(mode=context.GRAPH_MODE, device_target="GPU" if args.use_gpu else "CPU")
 
-# Set the context for MindSpore
-devices = args.devices.replace(' ', '')
-device_ids = [int(id_) for id_ in devices.split(',')]
-context.set_context(mode=context.GRAPH_MODE, device_target="GPU", device_id=args.gpu if args.use_gpu else None)
+args.use_gpu = True if mindspore.context.get_context("device_target") == "GPU" and args.use_gpu else False
+
+if args.use_gpu and args.use_multi_gpu:
+    args.devices = args.devices.replace(' ', '')
+    device_ids = args.devices.split(',')
+    args.device_ids = [int(id_) for id_ in device_ids]
+    args.gpu = args.device_ids[0]
 
 print('Args in experiment:')
 print(args)
@@ -109,9 +118,8 @@ Exp = Exp_Main
 if args.is_training:
     for ii in range(args.itr):
         random.seed(fix_seed_list[ii])
-        np.random.seed(fix_seed_list[ii])
         mindspore.set_seed(fix_seed_list[ii])
-
+        np.random.seed(fix_seed_list[ii])
         # setting record of experiments
         setting = '{}_{}_{}_ft{}_sl{}_pl{}_{}_{}_{}_seed{}'.format(
             args.model_id,
@@ -124,8 +132,8 @@ if args.is_training:
             args.des,
             ii,
             fix_seed_list[ii])
-
-        exp = Exp(args)  # set experiments
+        
+        exp = Exp(args)
         print('>>>>>>>start training : {}>>>>>>>>>>>>>>>>>>>>>>>>>>'.format(setting))
         exp.train(setting)
 
