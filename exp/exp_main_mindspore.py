@@ -10,39 +10,13 @@ import mindspore as ms
 from mindspore import nn, ops
 from mindspore import context
 from mindspore.train import Model
-from mindspore.train.callback import EarlyStopping
 from mindspore import Tensor
-from utils.tools import adjust_learning_rate, visual, test_params_flop
+from utils.tools import EarlyStopping
 from utils.metrics import metric
-from data_provider.data_factory_ms import data_provider
+from data_provider.data_factory import data_provider
 from models import SparseTSF_mindspore
 
 warnings.filterwarnings('ignore')
-class OneCycleLR:
-    def __init__(self, optimizer, steps_per_epoch, pct_start, epochs, max_lr, min_lr=0):
-        self.optimizer = optimizer
-        self.steps_per_epoch = steps_per_epoch
-        self.pct_start = pct_start
-        self.epochs = epochs
-        self.max_lr = max_lr
-        self.min_lr = min_lr
-        self.total_steps = steps_per_epoch * epochs
-        self.steps_up = int(self.total_steps * pct_start)  
-        self.steps_down = self.total_steps - self.steps_up  
-        self.base_lr = min_lr
-    
-    def get_lr(self, current_step):
-        if current_step < self.steps_up:
-            
-            return self.base_lr + (self.max_lr - self.base_lr) * (current_step / self.steps_up)
-        else:
-            
-            return self.max_lr - (self.max_lr - self.min_lr) * ((current_step - self.steps_up) / self.steps_down)
-    
-    def step(self, current_step):
-        new_lr = self.get_lr(current_step)
-        for param_group in self.optimizer.param_groups:
-            param_group['lr'] = new_lr
 class TrainOneStep(nn.Cell):
     def __init__(self,model,optimizer,criterion,args):
         super(TrainOneStep,self).__init__()
@@ -69,40 +43,39 @@ class Exp_Basic(object):
     def __init__(self, args):
         self.args = args
         self.device = self._acquire_device()  
-        self.model = self._build_model() 
-        # self.model.to(self.device) 
+        self.model = self._build_model()  
 
     def _build_model(self):
-        raise NotImplementedError 
+        raise NotImplementedError  
         return None
 
     def _acquire_device(self):
         """根据 args 配置选择设备"""
         if self.args.use_gpu:
-            # 设置 MindSpore 使用的设备
+         
             device = "GPU" if not self.args.use_multi_gpu else self.args.devices
-            context.set_context(device_target=device)  # 配置 MindSpore 的设备目标
+            context.set_context(device_target=device)  
             print(f"Use GPU: {device}")
         else:
-            context.set_context(device_target="CPU")  # 如果不使用 GPU，使用 CPU
+            context.set_context(device_target="CPU") 
             device = "CPU"
             print("Use CPU")
         return device
 
     def _get_data(self):
-        """获取数据的占位方法，子类可以根据需求实现"""
+
         pass
 
     def vali(self):
-        """验证模型的占位方法，子类可以根据需求实现"""
+
         pass
 
     def train(self):
-        """训练模型的占位方法，子类可以根据需求实现"""
+
         pass
 
     def test(self):
-        """测试模型的占位方法，子类可以根据需求实现"""
+
         pass
 
 class Exp_Main(Exp_Basic):
@@ -167,29 +140,6 @@ class Exp_Main(Exp_Basic):
         total_loss = np.mean(total_loss)
         self.model.set_train(True)
         return total_loss
-
-    def forward(self, batch_x, batch_x_mark, batch_y, batch_y_mark, dec_inp):
-        pred_len = self.args.pred_len
-        criterion = self._select_criterion()
-
-        if self.args.use_amp:
-            with ms.amp.auto_mixed_precision():
-                outputs = self.model(batch_x)
-            f_dim = -1 if self.args.features == 'MS' else 0
-            outputs = outputs[:, -self.args.pred_len:, f_dim:]
-            batch_y = batch_y[:, -self.args.pred_len:, f_dim:]
-
-            loss = criterion(outputs, batch_y)
-        else:
-            outputs = self.model(batch_x)
-            f_dim = -1 if self.args.features == 'MS' else 0
-            outputs = outputs[:, -self.args.pred_len:, f_dim:]
-            batch_y = batch_y[:, -self.args.pred_len:, f_dim:]
-
-            loss = criterion(outputs, batch_y)
-
-        return loss, outputs
-
     def train(self, setting):
         train_data, train_loader = self._get_data(flag='train')
         vali_data, vali_loader = self._get_data(flag='val')
@@ -201,19 +151,11 @@ class Exp_Main(Exp_Basic):
         if not os.path.exists(path):
             os.makedirs(path)
 
-        early_stopping = EarlyStopping(patience=self.args.patience, verbose=True)
-
+        early_stopping = EarlyStopping(patience=self.args.patience, verbose=True, min_delta=0.0001)
         criterion = self._select_criterion()
         train_onestep = TrainOneStep(self.model, model_optim, criterion, self.args)
-        scheduler = OneCycleLR(
-            optimizer=model_optim,
-            steps_per_epoch=len(train_loader),
-            pct_start=self.args.pct_start,
-            epochs=self.args.train_epochs,
-            max_lr=self.args.learning_rate
-        )
 
-        best_vali_loss = float('inf')  
+        best_vali_loss = float('inf') 
 
         for epoch in range(self.args.train_epochs):
             iter_count = 0
@@ -228,17 +170,10 @@ class Exp_Main(Exp_Basic):
                 batch_y = Tensor(batch_y, ms.float32)
                 batch_x_mark = Tensor(batch_x_mark, ms.float32)
                 batch_y_mark = Tensor(batch_y_mark, ms.float32)
-                batch_y = batch_y.asnumpy().astype(np.float32)
-
-                dec_inp = Tensor(np.zeros((batch_y.shape[0], self.args.pred_len, batch_y.shape[2]), dtype=np.float32), ms.float32)
-                batch_y = Tensor(batch_y, ms.float32)
+                dec_inp = ops.zeros_like(batch_y[:, -self.args.pred_len:, :])
                 dec_inp = ops.Concat(1)([batch_y[:, :self.args.label_len, :], dec_inp])
+                dec_inp = Tensor(dec_inp, ms.float32)
 
-                outputs = self.model(batch_x)
-                f_dim = -1 if self.args.features == 'MS' else 0
-                outputs = outputs[:, -self.args.pred_len:, f_dim:]
-                batch_y = batch_y[:, -self.args.pred_len:, f_dim:]
-                outputs = Tensor(outputs, ms.float32)
                 loss = train_onestep(batch_x, batch_y, batch_x_mark, batch_y_mark, dec_inp)
                 train_loss.append(loss.item())
 
@@ -260,34 +195,31 @@ class Exp_Main(Exp_Basic):
 
             print(f"Epoch {epoch + 1} | Train Loss: {avg_loss:.7f}, Vali Loss: {vali_loss:.7f}, Test Loss: {test_loss:.7f}")
 
-            if vali_loss < best_vali_loss:  
+            early_stopping.check(vali_loss, self.model)
+
+
+
+            if early_stopping.stop_training:
+                print(f"Epoch {epoch+1}: 训练提前结束")
+                break  
+
+
+            if vali_loss < best_vali_loss:
                 best_vali_loss = vali_loss
                 best_model_path = os.path.join(path, 'best_model.ckpt')
-                ms.save_checkpoint(self.model, best_model_path)  # 保存模型
+                ms.save_checkpoint(self.model, best_model_path)
 
-            # 在此处可以使用 early_stopping 进行早期停止
-            # early_stopping(vali_loss, self.model, path)
-            # if early_stopping.early_stop:
-            #     print("Early stopping")
-            #     break
 
-        # 加载最佳模型（即验证集损失最低的模型）
         self.model.set_train(False)
-        # self.model.load_state_dict(ms.load_checkpoint(best_model_path))
-         
-        # param_dict = ms.load_checkpoint(path+'best_model.ckpt')
-        # ms.load_param_into_net(self.model, param_dict)
-        
-        model_path = path+'/'+'checkpoint.ckpt'
+        model_path = path + '/' + 'best_model.ckpt'
         checkpoint_dir = os.path.dirname(model_path)
         if not os.path.exists(checkpoint_dir):
-            print(f"路径 {checkpoint_dir} 不存在，正在创建...")
             os.makedirs(checkpoint_dir)
 
-        # 加载模型参数
+
         if os.path.exists(model_path):
-            param_dict = ms.load_checkpoint(model_path)  # 加载检查点
-            ms.load_param_into_net(self.model, param_dict)  # 将参数加载到模型中
+            param_dict = ms.load_checkpoint(model_path)  
+            ms.load_param_into_net(self.model, param_dict)  
             print(f"成功加载模型：{model_path}")
         else:
             print(f"错误：找不到检查点文件：{model_path}")
@@ -315,8 +247,6 @@ class Exp_Main(Exp_Basic):
             batch_x_mark = cast(batch_x_mark,ms.float32)
             batch_y_mark = cast(batch_y_mark,ms.float32)
 
-            # dec_inp = Tensor(np.zeros_like(batch_y[:, -self.args.pred_len:, :]), ms.float32)
-            # dec_inp = ops.Concat(1)([batch_y[:, :self.args.label_len, :], dec_inp])
 
             outputs = self.model(batch_x)
 
@@ -344,7 +274,6 @@ class Exp_Main(Exp_Basic):
         
 
     def predict(self, setting, load=False):
-        
         pred_data, pred_loader = self._get_data(flag='pred')
 
 
@@ -363,7 +292,8 @@ class Exp_Main(Exp_Basic):
             batch_y_mark = Tensor(batch_y_mark, ms.float32).to(self.device)
 
             dec_inp = Tensor(np.zeros([batch_y.shape[0], self.args.pred_len, batch_y.shape[2]]), ms.float32)
-            dec_inp = ops.Concat(1)([batch_y[:, :self.args.label_len, :], dec_inp])  # 拼接输入
+            dec_inp = ops.Concat(1)([batch_y[:, :self.args.label_len, :], dec_inp])  
+
 
             with ms.no_grad():
                 if any(substr in self.args.model for substr in {'Linear', 'TST', 'SparseTSF'}):
@@ -373,6 +303,7 @@ class Exp_Main(Exp_Basic):
                         outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)[0]
                     else:
                         outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+
 
             pred = outputs.asnumpy()
             preds.append(pred)
