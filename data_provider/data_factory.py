@@ -1,6 +1,5 @@
-import mindspore.dataset as ds
-import numpy as np
-from data_loader import Dataset_ETT_hour, Dataset_ETT_minute, Dataset_Custom, Dataset_Pred, Dataset_Solar
+from data_provider.data_loader import Dataset_ETT_hour, Dataset_ETT_minute, Dataset_Custom, Dataset_Pred, Dataset_Solar
+from mindtorch.torch.utils.data import DataLoader
 
 data_dict = {
     'ETTh1': Dataset_ETT_hour,
@@ -11,13 +10,14 @@ data_dict = {
     'Solar': Dataset_Solar
 }
 
+
 def data_provider(args, flag):
     Data = data_dict[args.data]
     timeenc = 0 if args.embed != 'timeF' else 1
 
     if flag == 'test':
         shuffle_flag = False
-        drop_last = False
+        drop_last = False  # fix bug
         batch_size = args.batch_size
         freq = args.freq
     elif flag == 'pred':
@@ -32,7 +32,6 @@ def data_provider(args, flag):
         batch_size = args.batch_size
         freq = args.freq
 
-    # 创建数据集实例
     data_set = Data(
         root_path=args.root_path,
         data_path=args.data_path,
@@ -43,20 +42,11 @@ def data_provider(args, flag):
         timeenc=timeenc,
         freq=freq
     )
-
     print(flag, len(data_set))
-
-    # 使用 GeneratorDataset 将数据集转换为 MindSpore 可用的数据集
-    # 需要确保 __getitem__ 返回的是 NumPy 格式的数据
-    generator_ds = ds.GeneratorDataset(
-        source=data_set,
-        column_names=["data", "label"],  # 这里的 column_names 需要与 Dataset 的输出一致
-        shuffle=shuffle_flag
-    )
-
-    # 设置 batch_size 和 drop_last 参数
-    generator_ds = generator_ds.batch(batch_size=batch_size, drop_remainder=drop_last)
-
-    # 返回数据集和加载器（在 MindSpore 中没有明确的 DataLoader，对应的是 Dataset 本身）
-    return data_set, generator_ds
-
+    data_loader = DataLoader(
+        data_set,
+        batch_size=batch_size,
+        shuffle=shuffle_flag,
+        num_workers=args.num_workers,
+        drop_last=drop_last)
+    return data_set, data_loader
